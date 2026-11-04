@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>텍스트 읽어주기</title>
+<style>
+  :root{--bg:#f6f4ef;--card:#fff;--ink:#222;--sub:#777;--acc:#2f6f5e;--hl:#fde9a8;--line:#e3dfd6}
+  @media (prefers-color-scheme:dark){:root{--bg:#18181a;--card:#232326;--ink:#eee;--sub:#999;--acc:#6cc3a8;--hl:#5a4a12;--line:#333}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+  header{padding:16px 16px 8px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:13px}
+  .wrap{max-width:720px;margin:0 auto;padding:0 12px 190px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  label.file{flex:1;min-width:160px;display:block;text-align:center;padding:14px;border:2px dashed var(--line);border-radius:12px;cursor:pointer;color:var(--sub)}
+  label.file.drag{border-color:var(--acc);color:var(--acc)}
+  input[type=file]{display:none}
+  button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 14px;cursor:pointer}
+  button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+  textarea{width:100%;min-height:90px;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+  #text{line-height:1.9;font-size:var(--fs,18px);white-space:pre-wrap;word-break:keep-all}
+  #text span{cursor:pointer;border-radius:4px}
+  #text span.cur{background:var(--hl)}
+  #text span.done{color:var(--sub)}
+  .empty{color:var(--sub);text-align:center;padding:30px 0}
+  .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+  .bar .in{max-width:720px;margin:0 auto}
+  .ctrl{display:flex;justify-content:center;gap:10px;margin:6px 0}
+  .ctrl button{font-size:20px;width:56px;height:48px;padding:0}
+  .ctrl #play{width:76px}
+  .opts{display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;font-size:13px;color:var(--sub)}
+  select{font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);grid-column:2/4;min-width:0}
+  input[type=range]{width:100%}
+  progress{width:100%;height:6px}
+  #fname{font-size:13px;color:var(--sub);margin-top:6px}
+  #warn{display:none;color:#c0392b;font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<header class="wrap" style="padding-bottom:0">
+  <h1>📖 텍스트 읽어주기</h1>
+  <div class="sub">.txt 파일을 열거나 글을 붙여넣으면 소리 내어 읽어줍니다. 문장을 누르면 거기서부터 읽어요.</div>
+</header>
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <label class="file" id="drop">📂 텍스트 파일 열기 (또는 끌어다 놓기)
+        <input type="file" id="file">
+      </label>
+      <button id="pasteToggle">✏️ 직접 입력</button>
+    </div>
+    <div id="pasteBox" style="display:none;margin-top:10px">
+      <textarea id="paste" placeholder="여기에 읽을 글을 붙여넣으세요"></textarea>
+      <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="primary" id="usePaste">이 글 읽기</button></div>
+    </div>
+    <div id="fname"></div>
+    <div id="warn">이 브라우저는 음성 읽기를 지원하지 않아요. Chrome, Safari, Edge에서 열어주세요.</div>
+  </div>
+  <div class="card"><div id="text"><div class="empty">아직 불러온 글이 없어요</div></div></div>
+</div>
+
+<div class="bar"><div class="in">
+  <progress id="prog" value="0" max="1"></progress>
+  <div class="ctrl">
+    <button id="prev" title="이전 문장">⏮</button>
+    <button id="play" class="primary" title="재생">▶</button>
+    <button id="stop" title="처음으로">⏹</button>
+    <button id="next" title="다음 문장">⏭</button>
+  </div>
+  <div class="opts">
+    <span>목소리</span><select id="voice"></select>
+    <span>속도</span><input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"><span id="rateV">1.0×</span>
+    <span>글자</span><input type="range" id="fs" min="14" max="30" step="1" value="18"><span id="fsV">18</span>
+  </div>
+</div></div>
+
+<script>
+const synth = window.speechSynthesis;
+const $ = id => document.getElementById(id);
+let chunks = [], idx = 0, playing = false, voices = [], docKey = '';
+const store = {
+  get(k){try{return localStorage.getItem(k)}catch(e){return null}},
+  set(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+};
+if(!synth) $('warn').style.display='block';
+
+// ---- 목소리 ----
+function loadVoices(){
+  if(!synth) return;
+  voices = synth.getVoices();
+  if(!voices.length) return;
+  const sorted = [...voices].sort((a,b)=>(b.lang.startsWith('ko')-a.lang.startsWith('ko')));
+  const saved = store.get('tts-voice');
+  $('voice').innerHTML = sorted.map(v=>`<option value="${v.voiceURI}">${v.name} (${v.lang})</option>`).join('');
+  if(saved && voices.some(v=>v.voiceURI===saved)) $('voice').value = saved;
+}
+if(synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
+$('voice').onchange = ()=>{ store.set('tts-voice',$('voice').value); restartIfPlaying(); };
+
+// ---- 설정 ----
+const r0 = store.get('tts-rate'); if(r0) $('rate').value = r0;
+const f0 = store.get('tts-fs'); if(f0) $('fs').value = f0;
+function syncOpts(){
+  $('rateV').textContent = (+$('rate').value).toFixed(1)+'×';
+  $('fsV').textContent = $('fs').value;
+  document.documentElement.style.setProperty('--fs',$('fs').value+'px');
+}
+syncOpts();
+$('rate').oninput = ()=>{ syncOpts(); store.set('tts-rate',$('rate').value); };
+$('rate').onchange = restartIfPlaying;
+$('fs').oninput = ()=>{ syncOpts(); store.set('tts-fs',$('fs').value); };
+
+// ---- 파일 읽기 (UTF-8 / EUC-KR 자동 판별) ----
+async function readFile(f){
+  const buf = await f.arrayBuffer();
+  let text;
+  try { text = new TextDecoder('utf-8',{fatal:true}).decode(buf); }
+  catch(e){
+    try { text = new TextDecoder('euc-kr').decode(buf); }
+    catch(e2){ text = new TextDecoder('utf-8').decode(buf); }
+  }
+  load(text.replace(/^﻿/,''), f.name);
+}
+$('file').onchange = e => {
+  const f=e.target.files[0];
+  if(f) readFile(f).catch(()=>{ $('fname').textContent='⚠️ 파일을 읽지 못했어요. "직접 입력"에 글을 붙여넣어 보세요.'; });
+  e.target.value='';
+};
+const drop = $('drop');
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('drag')}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) readFile(f);});
+$('pasteToggle').onclick = ()=>{ const b=$('pasteBox'); b.style.display = b.style.display==='none'?'block':'none'; };
+$('usePaste').onclick = ()=>{ const t=$('paste').value.trim(); if(t){ load(t,'직접 입력한 글'); $('pasteBox').style.display='none'; } };
+
+// ---- 문장 나누기 ----
+function split(text){
+  const out = [];
+  const re = /[^.!?…。\n]*(?:[.!?…。]+["'”’)\]]*|\n+|$)/g;
+  let m;
+  while((m = re.exec(text)) !== null){
+    if(m[0]==='') { re.lastIndex++; if(re.lastIndex>text.length) break; continue; }
+    let s = m[0];
+    // 너무 긴 문장은 쉼표/공백 기준으로 잘라서 (브라우저가 긴 문장에서 멈추는 문제 방지)
+    while(s.length > 180){
+      let cut = Math.max(s.lastIndexOf(',',180), s.lastIndexOf('，',180));
+      if(cut < 60) cut = s.lastIndexOf(' ',180);
+      if(cut < 60) cut = 180;
+      out.push(s.slice(0,cut+1)); s = s.slice(cut+1);
+    }
+    out.push(s);
+  }
+  return out;
+}
+
+function hash(s){let h=0;for(let i=0;i<s.length;i+=Math.ceil(s.length/2000)||1)h=(h*31+s.charCodeAt(i))|0;return h+':'+s.length;}
+
+function load(text, name){
+  stop(true);
+  chunks = split(text);
+  docKey = 'tts-pos-'+hash(text);
+  const html = chunks.map((c,i)=>`<span data-i="${i}">${c.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`).join('');
+  $('text').innerHTML = html || '<div class="empty">내용이 비어 있어요</div>';
+  $('prog').max = Math.max(chunks.length,1);
+  const saved = +store.get(docKey) || 0;
+  idx = saved < chunks.length ? saved : 0;
+  $('fname').textContent = `📄 ${name} · ${chunks.length}개 문장` + (idx>0?` · 지난번 위치(${idx+1}번째)부터 이어서`:'');
+  mark();
+  if(idx>0) scrollToCur();
+}
+
+$('text').onclick = e => {
+  const sp = e.target.closest('span[data-i]'); if(!sp) return;
+  idx = +sp.dataset.i; mark(); speakFrom();
+};
+
+// ---- 표시 ----
+function mark(){
+  document.querySelectorAll('#text span').forEach(sp=>{
+    const i=+sp.dataset.i;
+    sp.classList.toggle('cur', i===idx && chunks.length>0);
+    sp.classList.toggle('done', i<idx);
+  });
+  $('prog').value = idx;
+  $('play').textContent = playing ? '⏸' : '▶';
+  store.set(docKey, idx);
+}
+function scrollToCur(){
+  const sp = document.querySelector('#text span.cur');
+  if(sp) sp.scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+// ---- 재생 ----
+let token = 0;
+function speakFrom(){
+  if(!synth || !chunks.length) return;
+  token++; const my = token;
+  synth.cancel();
+  playing = true;
+  const step = () => {
+    if(my !== token) return;
+    while(idx < chunks.length && !chunks[idx].trim()) idx++;
+    if(idx >= chunks.length){ playing=false; idx=0; mark(); store.set(docKey,0); return; }
+    mark(); scrollToCur();
+    const u = new SpeechSynthesisUtterance(chunks[idx].trim());
+    const v = voices.find(v=>v.voiceURI===$('voice').value);
+    if(v){ u.voice=v; u.lang=v.lang; } else u.lang='ko-KR';
+    u.rate = +$('rate').value;
+    u.onend = () => { if(my!==token) return; idx++; step(); };
+    u.onerror = (e) => { if(my!==token) return; if(e.error==='interrupted'||e.error==='canceled') return; idx++; step(); };
+    synth.speak(u);
+  };
+  // 일부 브라우저는 cancel 직후 speak가 무시되는 문제가 있어 약간 지연
+  setTimeout(step, 60);
+}
+function pause(){ token++; playing=false; synth && synth.cancel(); mark(); }
+function stop(silent){ token++; playing=false; synth && synth.cancel(); idx=0; if(!silent) mark(); }
+function restartIfPlaying(){ if(playing) speakFrom(); }
+
+$('play').onclick = ()=>{ if(!chunks.length){ $('file').click(); return; } playing ? pause() : speakFrom(); };
+$('stop').onclick = ()=>{ stop(); window.scrollTo({top:0,behavior:'smooth'}); };
+$('prev').onclick = ()=>{ idx=Math.max(0,idx-1); playing ? speakFrom() : (mark(),scrollToCur()); };
+$('next').onclick = ()=>{ idx=Math.min(chunks.length-1,idx+1); playing ? speakFrom() : (mark(),scrollToCur()); };
+
+// 크롬 데스크톱에서 오래 읽으면 멈추는 문제 방지
+setInterval(()=>{ if(playing && synth && synth.speaking && !synth.paused && !/Android|iPhone|iPad/i.test(navigator.userAgent)){ synth.pause(); synth.resume(); } }, 10000);
+</script>
+</body>
+</html>
