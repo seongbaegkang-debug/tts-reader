@@ -73,6 +73,7 @@
   <div class="opts">
     <span>목소리</span><select id="voice"></select>
     <span>속도</span><input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"><span id="rateV">1.0×</span>
+    <span>톤</span><input type="range" id="pitch" min="0.5" max="1.5" step="0.05" value="0.9"><span id="pitchV">0.90</span>
     <span>글자</span><input type="range" id="fs" min="14" max="30" step="1" value="18"><span id="fsV">18</span>
   </div>
 </div></div>
@@ -103,7 +104,9 @@ $('voice').onchange = ()=>{ store.set('tts-voice',$('voice').value); restartIfPl
 // ---- 설정 ----
 const r0 = store.get('tts-rate'); if(r0) $('rate').value = r0;
 const f0 = store.get('tts-fs'); if(f0) $('fs').value = f0;
+const p0 = store.get('tts-pitch'); if(p0) $('pitch').value = p0;
 function syncOpts(){
+  $('pitchV').textContent = (+$('pitch').value).toFixed(2);
   $('rateV').textContent = (+$('rate').value).toFixed(1)+'×';
   $('fsV').textContent = $('fs').value;
   document.documentElement.style.setProperty('--fs',$('fs').value+'px');
@@ -111,6 +114,8 @@ function syncOpts(){
 syncOpts();
 $('rate').oninput = ()=>{ syncOpts(); store.set('tts-rate',$('rate').value); };
 $('rate').onchange = restartIfPlaying;
+$('pitch').oninput = ()=>{ syncOpts(); store.set('tts-pitch',$('pitch').value); };
+$('pitch').onchange = restartIfPlaying;
 $('fs').oninput = ()=>{ syncOpts(); store.set('tts-fs',$('fs').value); };
 
 // ---- 파일 읽기 (UTF-8 / EUC-KR 자동 판별) ----
@@ -209,6 +214,7 @@ function speakFrom(){
     const v = voices.find(v=>v.voiceURI===$('voice').value);
     if(v){ u.voice=v; u.lang=v.lang; } else u.lang='ko-KR';
     u.rate = +$('rate').value;
+    u.pitch = +$('pitch').value;
     u.onend = () => { if(my!==token) return; idx++; step(); };
     u.onerror = (e) => { if(my!==token) return; if(e.error==='interrupted'||e.error==='canceled') return; idx++; step(); };
     synth.speak(u);
