@@ -74,6 +74,7 @@
     <span>목소리</span><select id="voice"></select>
     <span>속도</span><input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"><span id="rateV">1.0×</span>
     <span>톤</span><input type="range" id="pitch" min="0.5" max="1.5" step="0.05" value="0.9"><span id="pitchV">0.90</span>
+    <span>억양</span><label style="grid-column:2/4;display:flex;align-items:center;gap:6px;color:var(--ink)"><input type="checkbox" id="flat" checked> 억양 줄이기 (물음표·느낌표·따옴표 때문에 생기는 오르내림 없애기)</label>
     <span>글자</span><input type="range" id="fs" min="14" max="30" step="1" value="18"><span id="fsV">18</span>
   </div>
 </div></div>
@@ -116,6 +117,19 @@ $('rate').oninput = ()=>{ syncOpts(); store.set('tts-rate',$('rate').value); };
 $('rate').onchange = restartIfPlaying;
 $('pitch').oninput = ()=>{ syncOpts(); store.set('tts-pitch',$('pitch').value); };
 $('pitch').onchange = restartIfPlaying;
+if(store.get('tts-flat')==='0') $('flat').checked = false;
+$('flat').onchange = ()=>{ store.set('tts-flat',$('flat').checked?'1':'0'); restartIfPlaying(); };
+// 억양 줄이기: 음성 엔진이 억양을 크게 바꾸는 부호를 평서문 부호로 바꿈
+function flatten(s){
+  return s
+    .replace(/[“”"「」『』‘’]/g,'')
+    .replace(/(^|\s)'|'(\s|$)/g,'$1$2')
+    .replace(/[?？!！]+/g,'.')
+    .replace(/~+/g,'')
+    .replace(/…+|\.{2,}/g,',')
+    .replace(/\s+/g,' ')
+    .trim();
+}
 $('fs').oninput = ()=>{ syncOpts(); store.set('tts-fs',$('fs').value); };
 
 // ---- 파일 읽기 (UTF-8 / EUC-KR 자동 판별) ----
@@ -210,7 +224,9 @@ function speakFrom(){
     while(idx < chunks.length && !chunks[idx].trim()) idx++;
     if(idx >= chunks.length){ playing=false; idx=0; mark(); store.set(docKey,0); return; }
     mark(); scrollToCur();
-    const u = new SpeechSynthesisUtterance(chunks[idx].trim());
+    let say = chunks[idx].trim();
+    if($('flat').checked) say = flatten(say) || say;
+    const u = new SpeechSynthesisUtterance(say);
     const v = voices.find(v=>v.voiceURI===$('voice').value);
     if(v){ u.voice=v; u.lang=v.lang; } else u.lang='ko-KR';
     u.rate = +$('rate').value;
